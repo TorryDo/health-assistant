@@ -4,9 +4,14 @@ from typing import List
 from fastapi import FastAPI
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from GeminiHelper import GeminiHelper
 from HealthIndexes import HealthIndexes
 
 app = FastAPI()
+
+API_KEY = "your-api-key-here"
+
+gemini_helper = GeminiHelper(api_key=API_KEY)
 
 
 class ConnectionManager:
@@ -35,9 +40,38 @@ def read_root():
 
 @app.post("/api/health-indexes")
 async def push_health_indexes(healths: List[HealthIndexes]):
-    message = {'data': [health.dict() for health in healths]}
-    await manager.broadcast(message=json.dumps(message))
-    return message
+    result_message = {'data': [health.dict() for health in healths]}
+
+    message_1 = f"""
+            My heart rate = 121, spo2 = 91, and my body temperature = 36 degrees celsius. 
+            Is my health okay? If not, could you give me some suggestions about my health? 
+            Limit the response in 100 words
+        """
+
+    message_2 = f"""
+                Here are my heart rate, spo2, and my temperature in celsius (displayed as json format). 
+                Is my health okay? If not, could you give me some suggestions about my health? 
+                Limit the response in 100 words, short but informative.
+                
+                {healths}
+            """
+
+    response = gemini_helper.request(
+        message_2
+    )
+
+    print(response.text)
+
+    indexes = list(map(lambda x: x.to_dict(), healths))
+
+    await manager.broadcast(message=json.dumps(
+        {
+            'data': indexes,
+            'message': response.text
+        }
+    ))
+
+    return True
 
 
 @app.websocket("/ws/health-indexes")
@@ -46,6 +80,9 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            await websocket.send_text(f"Message text was: {data}")
+
+            response = gemini_helper.request(data).text
+
+            await websocket.send_text(response)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
